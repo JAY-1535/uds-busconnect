@@ -1,0 +1,16 @@
+project_id = "jsmyvcvbaorbszpvmixu"
+
+[functions.initiate-payment]
+verify_jwt = true
+
+[functions.paystack-webhook]
+verify_jwt = false
+
+[functions.send-notification]
+verify_jwt = false
+
+[functions.verify-payment]
+verify_jwt = true
+
+[functions.submit-momo-otp]
+verify_jwt = false

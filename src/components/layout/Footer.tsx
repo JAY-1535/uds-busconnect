@@ -63,12 +63,12 @@ export const Footer = () => {
             <h4 className="font-display font-bold mb-4">For Organizers</h4>
             <ul className="space-y-2">
               <li>
-                <Link to="/apply-organizer" className="text-sm text-primary-foreground/80 hover:text-accent transition-colors">
+                <Link to="/auth?mode=signup&redirect=/apply-organizer" className="text-sm text-primary-foreground/80 hover:text-accent transition-colors">
                   Become an Organizer
                 </Link>
               </li>
               <li>
-                <Link to="/auth?redirect=/organizer" className="text-sm text-primary-foreground/80 hover:text-accent transition-colors">
+                <Link to="/auth?mode=signin&redirect=/organizer" className="text-sm text-primary-foreground/80 hover:text-accent transition-colors">
                   Organizer Login
                 </Link>
               </li>

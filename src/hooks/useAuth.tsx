@@ -48,34 +48,47 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   const fetchUserData = async (userId: string) => {
     try {
-      // Fetch profile
-      const { data: profileData } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('user_id', userId)
-        .single();
+      setProfile(null);
+      setRoles([]);
+      setAdminPermissions([]);
 
-      if (profileData) {
-        setProfile(profileData as UserProfile);
+      // Load all user-linked data in parallel to reduce post-login wait time.
+      const [profileRes, rolesRes, permissionsRes] = await Promise.allSettled([
+        supabase
+          .from('profiles')
+          .select('*')
+          .eq('user_id', userId)
+          .single(),
+        supabase
+          .from('user_roles')
+          .select('role, campus')
+          .eq('user_id', userId),
+        supabase
+          .from('admin_permissions')
+          .select('section')
+          .eq('user_id', userId),
+      ]);
+
+      if (profileRes.status === 'fulfilled') {
+        const profileData = profileRes.value.data;
+        if (profileData) {
+          setProfile(profileData as UserProfile);
+        }
       }
 
-      // Fetch roles
-      const { data: rolesData } = await supabase
-        .from('user_roles')
-        .select('role, campus')
-        .eq('user_id', userId);
-
-      if (rolesData) {
-        setRoles(rolesData as UserRole[]);
+      if (rolesRes.status === 'fulfilled') {
+        const rolesData = rolesRes.value.data;
+        setRoles((rolesData || []) as UserRole[]);
+      } else {
+        setRoles([]);
       }
 
-      // Fetch admin permissions (if any)
-      const { data: permissionsData } = await supabase
-        .from('admin_permissions')
-        .select('section')
-        .eq('user_id', userId);
-
-      setAdminPermissions((permissionsData || []).map((p) => p.section));
+      if (permissionsRes.status === 'fulfilled') {
+        const permissionsData = permissionsRes.value.data;
+        setAdminPermissions((permissionsData || []).map((p) => p.section));
+      } else {
+        setAdminPermissions([]);
+      }
     } catch (error) {
       console.error('Error fetching user data:', error);
     }

@@ -256,7 +256,7 @@ export default function OrganizerDashboard() {
                   <Button
                     variant="link"
                     className="mt-2"
-                    onClick={() => navigate("/organizer/bus-groups/new")}
+                    onClick={() => navigate("/organizer/bus-groups")}
                   >
                     Create your first bus group
                   </Button>

@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react';
+import { useState, useEffect, createContext, useContext, ReactNode, useRef } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
@@ -18,6 +18,11 @@ interface UserRole {
   role: 'student' | 'organizer' | 'admin';
   campus: 'nyankpala' | 'tamale' | null;
 }
+
+const timeout = (ms: number) =>
+  new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error(`Auth bootstrap timed out after ${ms}ms`)), ms);
+  });
 
 interface AuthContextType {
   user: User | null;
@@ -44,7 +49,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [roles, setRoles] = useState<UserRole[]>([]);
   const [adminPermissions, setAdminPermissions] = useState<string[]>([]);
+  const [hasApprovedOrganizerApplication, setHasApprovedOrganizerApplication] = useState(false);
   const [loading, setLoading] = useState(true);
+  const lastUserIdRef = useRef<string | null>(null);
 
   const fetchUserData = async (userId: string) => {
     try {
@@ -53,20 +60,30 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setAdminPermissions([]);
 
       // Load all user-linked data in parallel to reduce post-login wait time.
-      const [profileRes, rolesRes, permissionsRes] = await Promise.allSettled([
-        supabase
-          .from('profiles')
-          .select('*')
-          .eq('user_id', userId)
-          .single(),
-        supabase
-          .from('user_roles')
-          .select('role, campus')
-          .eq('user_id', userId),
-        supabase
-          .from('admin_permissions')
-          .select('section')
-          .eq('user_id', userId),
+      const [profileRes, rolesRes, permissionsRes, organizerAppRes] = await Promise.race([
+        Promise.allSettled([
+          supabase
+            .from('profiles')
+            .select('*')
+            .eq('user_id', userId)
+            .single(),
+          supabase
+            .from('user_roles')
+            .select('role, campus')
+            .eq('user_id', userId),
+          supabase
+            .from('admin_permissions')
+            .select('section')
+            .eq('user_id', userId),
+          supabase
+            .from('organizer_applications')
+            .select('status')
+            .eq('user_id', userId)
+            .eq('status', 'approved')
+            .limit(1)
+            .maybeSingle(),
+        ]),
+        timeout(10000),
       ]);
 
       if (profileRes.status === 'fulfilled') {
@@ -89,6 +106,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       } else {
         setAdminPermissions([]);
       }
+
+      if (organizerAppRes.status === 'fulfilled') {
+        setHasApprovedOrganizerApplication(Boolean(organizerAppRes.value.data));
+      } else {
+        setHasApprovedOrganizerApplication(false);
+      }
     } catch (error) {
       console.error('Error fetching user data:', error);
     }
@@ -104,28 +127,41 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // Set up auth state listener FIRST
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        setLoading(true);
         setSession(session);
         setUser(session?.user ?? null);
+        const nextUserId = session?.user?.id ?? null;
+
+        // Token refresh should not block UI with full profile/role refetches.
+        if (event === 'TOKEN_REFRESHED' && nextUserId === lastUserIdRef.current) {
+          return;
+        }
+
+        setLoading(true);
 
         if (session?.user) {
           // Important: don't mark auth as "ready" until role/profile are loaded.
           // Otherwise ProtectedRoute can redirect an organizer/admin to public pages.
           fetchUserData(session.user.id)
-            .finally(() => setLoading(false));
+            .finally(() => {
+              lastUserIdRef.current = session.user.id;
+              setLoading(false);
+            });
           return;
         }
 
         setProfile(null);
         setRoles([]);
         setAdminPermissions([]);
+        setHasApprovedOrganizerApplication(false);
 
         if (event === 'SIGNED_OUT') {
           setProfile(null);
           setRoles([]);
           setAdminPermissions([]);
+          setHasApprovedOrganizerApplication(false);
         }
 
+        lastUserIdRef.current = null;
         setLoading(false);
       }
     );
@@ -137,7 +173,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchUserData(session.user.id)
-          .finally(() => setLoading(false));
+          .finally(() => {
+            lastUserIdRef.current = session.user.id;
+            setLoading(false);
+          });
         return;
       }
       setLoading(false);
@@ -179,10 +218,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setProfile(null);
     setRoles([]);
     setAdminPermissions([]);
+    setHasApprovedOrganizerApplication(false);
+    lastUserIdRef.current = null;
   };
 
   const isAdmin = roles.some(r => r.role === 'admin');
-  const isOrganizer = roles.some(r => r.role === 'organizer');
+  const isOrganizer = roles.some(r => r.role === 'organizer') || hasApprovedOrganizerApplication;
   const isStudent = roles.some(r => r.role === 'student');
   
   // Primary role (admin > organizer > student)
